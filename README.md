@@ -110,8 +110,6 @@ sudo mount /dev/sdc1 /mnt/immich-storage-new
 # 5. Copy the Data
   
 Copying happens in 2 passes: a long one while Immich stays online, and a short final one after stopping it, so most of the data is already in place and downtime stays minimal.
-
-![Copying data](https://github.com/MikeMilenk/Immich-Storage-Migration/blob/21822aa3bc3877973d61d2807b35c2b748d61f03/images/6-Copying%20data.png)
  
 ## 5.1 First Copy Pass (Immich Still Running)
   
@@ -120,6 +118,7 @@ This pass copies the bulk of the data while Immich keeps running — no downtime
 ```bash
 sudo rsync -aHAX --info=progress2 /mnt/immich-storage/ /mnt/immich-storage-new/
 ```
+![Copying data](https://github.com/MikeMilenk/Immich-Storage-Migration/blob/21822aa3bc3877973d61d2807b35c2b748d61f03/images/6-Copying%20data.png)
  
 For a large library on a mechanical HDD, this can take hours. In my case, copying almost 800GB of data took 2.5h
  
