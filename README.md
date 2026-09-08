@@ -183,6 +183,8 @@ cd ~
 
 ![Mount new disk into original mountpoint](https://github.com/MikeMilenk/Immich-Storage-Migration/blob/b6403500a2fc470c5db958e30226486acbcaca5e/images/9-mount%20new%20disk%20into%20original%20mount%20point.png)
 
+Now our new `sdc` disk is sitting in the original mount point `/mnt/immich/storage`.
+
 ---
 
 # 7. Make the New Mount Permanent
