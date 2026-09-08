@@ -22,13 +22,13 @@ This guide shows how to migrate an [Immich](https://immich.app/) library off a Z
 - **[2. Partition the New Disk on Proxmox](#2-partition-the-new-disk-on-proxmox)**
 - **[3. Pass the Physical Disk to the VM](#3-pass-the-physical-disk-to-the-vm)**
 - **[4. Create the Filesystem and a Temporary Mount](#4-create-the-filesystem-and-a-temporary-mount)**
-- **[5. First Copy Pass (Immich Still Running)](#5-first-copy-pass-immich-still-running)**
-- **[6. Stop Immich](#6-stop-immich)**
-- **[7. Final Copy Pass (Immich Stopped)](#7-final-copy-pass-immich-stopped)**
-- **[8. Switch the Mountpoint](#8-switch-the-mountpoint)**
-- **[9. Update /etc/fstab](#9-update-etcfstab)**
-- **[10. Start Immich and Reboot Test](#10-start-immich-and-reboot-test)**
-- **[11. Summary](#11-summary)**
+- **[5. Copy the Data](#5-copy-the-data)**
+  - **[5.1 First Copy Pass (Immich Still Running)](#51-first-copy-pass-immich-still-running)**
+  - **[5.2 Final Copy Pass (Immich Stopped)](#52-final-copy-pass-immich-stopped)**
+- **[6. Switch the Mountpoint](#6-switch-the-mountpoint)**
+- **[7. Make the New Mount Permanent](#7-make-the-new-mount-permanent)**
+- **[8. Start Immich and Reboot Test](#8-start-immich-and-reboot-test)**
+- **[9. Summary](#9-summary)**
 
 ---
 
@@ -53,7 +53,7 @@ Clear old signatures and lay down a fresh GPT table:
 wipefs -a /dev/sde
 fdisk /dev/sde
 ```
-To find out what to enter next, press 'm' to open help.
+To find out what to enter next, press `m` to open help.
 ![Wipe disk and enter fdisk](https://github.com/MikeMilenk/Immich-Storage-Migration/blob/4814a9cf75b8529d2e93cec77b334e0f5a05c4d8/images/3.1-Wipe%20and%20Enter%20fdisk.png)
 
 Inside `fdisk`:
@@ -67,7 +67,7 @@ Enter   # accept default last sector (whole disk)
 w       # write changes
 ```
 
-I've highlighted in green the disk we just added, which became **scsi2**. I've also hidden the disk S/N for security reasons. 
+I've highlighted in green the disk we just added, which became `scsi2`. I've also hidden the disk S/N for security reasons. 
 ![Creating GPT](https://github.com/MikeMilenk/Immich-Storage-Migration/blob/4814a9cf75b8529d2e93cec77b334e0f5a05c4d8/images/3.2-Creating%20GPT.png)
 
 ---
@@ -82,123 +82,132 @@ qm config 111
 ```
 ![Adding new disk to VM](https://github.com/MikeMilenk/Immich-Storage-Migration/blob/4814a9cf75b8529d2e93cec77b334e0f5a05c4d8/images/3.3-Adding%20disk%20to%20VM%20111.png)
 
-
-Reboot the VM so it detects the new disk:
-
-```bash
-reboot -n
-```
-
-The disk should now appear inside the VM (in this case, as `sdc`).
+Reboot the VM so it detects the new disk.
+![Reboot VM](https://github.com/MikeMilenk/Immich-Storage-Migration/blob/21822aa3bc3877973d61d2807b35c2b748d61f03/images/4-Reboot%20VM.png)
 
 ---
 
 # 4. Create the Filesystem and a Temporary Mount
 
-[#4-create-the-filesystem-and-a-temporary-mount](#4-create-the-filesystem-and-a-temporary-mount)
-
-Inside the VM:
+The disk should now appear inside the VM. In the screenshot, I am in the Ubuntu VM running Immich (not the Proxmox host). I ran the `lsblk` command to verify that the new disk was detected (in this case, as `sdc`). I then formatted it as `ext4` and created the `sdc1` partition with the label `immich-data`."
 
 ```bash
 sudo mkfs.ext4 -L immich-data /dev/sdc1
 ```
+![Create new FS](https://github.com/MikeMilenk/Immich-Storage-Migration/blob/21822aa3bc3877973d61d2807b35c2b748d61f03/images/5.1-Create%20new%20FS.png)
 
-Don't mount straight over the live data — use a temporary mountpoint first, so the new and old storage stay clearly separate during the copy:
+Don't mount straight over the live data — use a temporary mountpoint first, so the new and old storage stay clearly separate during the copy.
+In my case, the original mount point is named `immich-storage`, and the new temporary one I'll name `immich-storage-new`
 
 ```bash
 sudo mkdir /mnt/immich-storage-new
 sudo mount /dev/sdc1 /mnt/immich-storage-new
 ```
+![Create new mointpoint](https://github.com/MikeMilenk/Immich-Storage-Migration/blob/21822aa3bc3877973d61d2807b35c2b748d61f03/images/5.2-Create%20new%20dir%20and%20Mountpoint.png)
 
 ---
 
-# 5. First Copy Pass (Immich Still Running)
+# 5. Copy the Data
+  
+Copying happens in 2 passes: a long one while Immich stays online, and a short final one after stopping it, so most of the data is already in place and downtime stays minimal.
 
-[#5-first-copy-pass-immich-still-running](#5-first-copy-pass-immich-still-running)
-
+![Copying data](https://github.com/MikeMilenk/Immich-Storage-Migration/blob/21822aa3bc3877973d61d2807b35c2b748d61f03/images/6-Copying%20data.png)
+ 
+## 5.1 First Copy Pass (Immich Still Running)
+  
 This pass copies the bulk of the data while Immich keeps running — no downtime yet, but not guaranteed 100% consistent, since Immich may still be writing.
-
+ 
 ```bash
 sudo rsync -aHAX --info=progress2 /mnt/immich-storage/ /mnt/immich-storage-new/
 ```
-
-For a large library on a mechanical HDD, this can take hours.
-
----
-
-# 6. Stop Immich
-
-[#6-stop-immich](#6-stop-immich)
-
-Find the compose file if needed:
-
+ 
+For a large library on a mechanical HDD, this can take hours. In my case, copying almost 800GB of data took 2.5h
+ 
+## 5.2 Final Copy Pass (Immich Stopped)
+  
+First, stop **Immich** so the source data is frozen. Find the compose file if needed:
+ 
 ```bash
 sudo find / -iname "docker-compose.yml" 2>/dev/null
 ```
-
+ 
 Stop the stack (this only removes the containers, not the data or images):
-
+ 
 ```bash
 cd /home/mike/immich-app && sudo docker compose down
 sudo docker ps -a   # confirm nothing is left running
 ```
+No containers should appear.
 
----
-
-# 7. Final Copy Pass (Immich Stopped)
-
-[#7-final-copy-pass-immich-stopped](#7-final-copy-pass-immich-stopped)
-
+![Finding and stopping Docker](https://github.com/MikeMilenk/Immich-Storage-Migration/blob/21822aa3bc3877973d61d2807b35c2b748d61f03/images/7-finding%20docker%20path%20and%20stopping%20it.png)
+ 
 With the source now frozen, re-sync — adding `--delete` so anything removed from the source is also removed from the copy:
-
+ 
 ```bash
 sudo rsync -aHAX --info=progress2 --delete /mnt/immich-storage/ /mnt/immich-storage-new/
 ```
 
 Since most data is already there, this should be fast. Verify both sides match before moving on:
-
+ 
 ```bash
 sudo du -sh /mnt/immich-storage /mnt/immich-storage-new
+```
+```bash
 sudo find /mnt/immich-storage -type f | wc -l
+```
+```bash
 sudo find /mnt/immich-storage-new -type f | wc -l
 ```
 
 Both the size and file count should be identical.
 
+![Verifying files q-ty](https://github.com/MikeMilenk/Immich-Storage-Migration/blob/21822aa3bc3877973d61d2807b35c2b748d61f03/images/8-verifying%20files%20q-ty.png)
+
 ---
 
-# 8. Switch the Mountpoint
-
-[#8-switch-the-mountpoint](#8-switch-the-mountpoint)
+# 6. Switch the Mountpoint
 
 ```bash
-cd ~
 sudo umount /mnt/immich-storage
+```
+```bash
 sudo umount /mnt/immich-storage-new
+```
+```bash
 sudo mount /dev/sdc1 /mnt/immich-storage
 ```
 
-> If `umount` reports "target is busy," make sure your shell isn't currently sitting inside that directory.
+> If `umount` reports "target is busy," make sure your shell isn't currently sitting inside that directory. In that case, it's better to navigate to your home directory..
+```bash
+cd ~
+```
 
 ---
 
-# 9. Update /etc/fstab
+# 7. Make the New Mount Permanent
 
-[#9-update-etcfstab](#9-update-etcfstab)
-
-Without this, the new disk won't remount automatically on reboot. Back up first, then swap the old disk's UUID for the new one:
+Without this, the new disk won't remount automatically on reboot. Back up first, then swap the old disk's `UUID` for the new one:
 
 ```bash
 sudo cp /etc/fstab /etc/fstab.bak
+```
+Enter the fstab editor:
+```bash
 sudo nano /etc/fstab
 ```
 
-Edit the line for `/mnt/immich-storage` to use the new filesystem's UUID (from `lsblk -f`), save (`Ctrl+O`, `Enter`), exit (`Ctrl+X`).
+![Backup fstab](https://github.com/MikeMilenk/Immich-Storage-Migration/blob/21822aa3bc3877973d61d2807b35c2b748d61f03/images/10-backup%20fstab.png)
 
-Verify, then test the syntax without rebooting:
+Edit the line for `/mnt/immich-storage` to use the new filesystem's UUID (from `lsblk -f`)
+Save it: `Ctrl+O`, `Enter`
+Exit the fstab editor: `Ctrl+X`
 
+Verify that changes were saved:
 ```bash
 cat /etc/fstab
+```
+Then check it works without rebootingЖ
+```bash
 sudo mount -a
 ```
 
@@ -206,35 +215,40 @@ No output from `mount -a` means no errors.
 
 ---
 
-# 10. Start Immich and Reboot Test
-
-[#10-start-immich-and-reboot-test](#10-start-immich-and-reboot-test)
+# 8. Start Immich and Reboot Test
 
 ```bash
 cd /home/mike/immich-app && sudo docker compose up -d
+```
+```bash
 sudo docker ps
 ```
 
+![Start Docker](https://github.com/MikeMilenk/Immich-Storage-Migration/blob/21822aa3bc3877973d61d2807b35c2b748d61f03/images/12-start%20docker.png)
+
 Check the web UI: gallery loads, thumbnails render, a few photos/videos open fine in full size.
 
-Then do one real reboot to confirm the disk mounts and Immich comes back up on its own from a cold start — this is a better test than `mount -a` alone:
+Then do one real reboot to confirm the disk mounts and Immich comes back up on its own from a cold start.
 
 ```bash
 reboot -n
 ```
+Remove the now-unneeded temporary mountpoint. In my case it was `immich-storage-new`:
+
+```bash
+sudo rmdir /mnt/immich-storage-new
+```
+
+**P.S.** I left the old `ZFS pool` and disk intact and attached to the VM for several days after the migration, keeping them as a safety net rather than cleaning up right away. Some issues — like a subtly corrupted file or a metadata mismatch — might only surface once Immich is actually used in daily practice (browsing albums, search, face recognition, etc.), not just from a quick file count and size comparison. Only once the new disk had proven stable under normal use did I move on to detaching the old disk from the VM and decommissioning the `ZFS pool`.
 
 ---
 
-# 11. Summary
-
-[#11-summary](#11-summary)
-
-The Immich library was migrated off the two-disk ZFS pool (pool → zvol → VM passthrough) onto a single physical HDD, passed through to the VM directly and formatted as plain ext4. The disk was partitioned and passed through from Proxmox, then formatted and mounted from inside the VM. Data was copied over in two rsync passes — a long first pass while Immich stayed online, followed by a short final pass after stopping Docker to guarantee a consistent copy. The mountpoint was then switched over, `/etc/fstab` updated to the new disk's UUID, and Immich brought back up and confirmed working, including after a full VM reboot.
-
-The old ZFS-backed disk was left attached and untouched at this point, kept as a safety net until the new disk has proven stable under normal, everyday use. Detaching it from the VM and decommissioning the ZFS pool is intentionally left as a separate, later step — not something to rush right after the migration.
-# Immich-Storage-Migration
-This guide shows how to migrate an Immich library off a ZFS pool onto a single physical HDD passed through directly to a Proxmox VM
-
-Background: in an earlier [guide](https://github.com/MikeMilenk/Immich-deployment.git), I built a ZFS pool (immich-zfs) out of 2 disks to back the Immich VM's storage. This guide undoes that — all data moves off the ZFS pool onto a single new physical disk, removing the ZFS layer entirely in favor of a plain disk.
-
-WARNING: This process involves formatting a disk and editing /etc/fstab. Always verify the exact disk by model, serial number, and size before running any destructive command. Do not proceed on a production system without a way to identify your disks by /dev/disk/by-id/.
+# 9. Summary
+- Identified and passed the new physical disk through to the Proxmox VM using its by-id path
+- Partitioned GPT on Proxmox, then formatted it as `ext4` from inside the VM
+- Mounted it to a temporary path `/mnt/immich-storage-new` and ran a first rsync pass while Immich stayed online
+- Stopped Docker, then ran a final rsync pass with `--delete` for a fully consistent copy
+- Unmounted both old and new disks, remounted the new disk onto the original `/mnt/immich-storage` path
+- Updated `/etc/fstab` with the new disk's `UUID` and verified it with mount `-a`
+- Brought Immich back up and confirmed everything worked, including after a full VM reboot
+- Left the old ZFS pool and disk intact and attached, as a safety net before eventual cleanup
