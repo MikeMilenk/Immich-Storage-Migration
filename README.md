@@ -181,6 +181,8 @@ sudo mount /dev/sdc1 /mnt/immich-storage
 cd ~
 ```
 
+![Mount new disk into original mountpoint](https://github.com/MikeMilenk/Immich-Storage-Migration/blob/b6403500a2fc470c5db958e30226486acbcaca5e/images/9-mount%20new%20disk%20into%20original%20mount%20point.png)
+
 ---
 
 # 7. Make the New Mount Permanent
