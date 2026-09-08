@@ -236,6 +236,11 @@ Then do one real reboot to confirm the disk mounts and Immich comes back up on i
 ```bash
 reboot -n
 ```
+
+In my case, I verified everything through the web interface and the mobile app. Immich is accessible, synchronization is working, and the available storage has been updated from 1.4 TB to 8 TB. Everything is working as expected.
+
+![Immich Mobile App](https://github.com/MikeMilenk/Immich-Storage-Migration/blob/1c25a81342ffca46c9d64c1b8cf9099dd88ceb8e/images/13-Immich%20Mobile%20app.PNG)
+
 Remove the now-unneeded temporary mountpoint. In my case it was `immich-storage-new`:
 
 ```bash
